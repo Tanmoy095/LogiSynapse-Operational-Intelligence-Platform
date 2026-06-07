@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     replaced_by_token_id UUID,                      -- Links to new token in rotation.
     device_fingerprint TEXT,                        -- Optional hash for risk (IP/UA).
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 -- Unique on hash (fast lookup, prevent duplicates).
 ALTER TABLE refresh_tokens ADD CONSTRAINT unique_refresh_token_hash UNIQUE (token_hash);

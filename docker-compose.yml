@@ -40,6 +40,26 @@ services:
       - loginet
     entrypoint: ["/bin/sh", "-c", "./entrypoint.sh"]
 
+  authentication-service:
+    build:
+      context: .
+      dockerfile: ./services/authentication-service/Dockerfile
+    container_name: authentication-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - AUTH_GRPC_ADDR=:50052
+      - AUTH_JWT_ISSUER=logisynapse-auth
+      - AUTH_JWT_AUDIENCE=logisynapse-gateway
+      - AUTH_AUTO_MIGRATE=true
+    ports:
+      - "50052:50052"
+    networks:
+      - loginet
+
   graphql-gateway:
     build:
       context: .
@@ -49,12 +69,14 @@ services:
       - .env
     environment:
       - SHIPMENT_SERVICE_ADDR=shipment-service:50051
+      - AUTH_SERVICE_ADDR=authentication-service:50052
     ports:
       - "8080:8080"
     networks:
       - loginet
     depends_on:
       - shipment-service
+      - authentication-service
 
   # ---------------------------------------------------
   # NEW: Temporal Services

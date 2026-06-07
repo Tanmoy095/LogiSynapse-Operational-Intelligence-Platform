@@ -11,10 +11,11 @@ import (
 // Analogy: The waiter, who uses the intercom (gRPC client) to talk to the kitchen.
 type Resolver struct {
 	shipmentClient *client.ShipmentClient
+	authClient     *client.AuthClient
 }
 
 // NewResolver initializes the resolver with a gRPC client.
 // Analogy: Hires a waiter and gives them the intercom to contact the kitchen.
-func NewResolver(shipmentClient *client.ShipmentClient) *Resolver {
-	return &Resolver{shipmentClient: shipmentClient}
+func NewResolver(shipmentClient *client.ShipmentClient, authClient *client.AuthClient) *Resolver {
+	return &Resolver{shipmentClient: shipmentClient, authClient: authClient}
 }

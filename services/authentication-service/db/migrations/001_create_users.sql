@@ -1,5 +1,7 @@
 --Services/authentication-service/db/migrations/001_create_users.sql
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 -- Invariants enforced: global email uniqueness (case-normalized), status management.
 --Users are foundational—tenants/memberships reference them
 CREATE TABLE IF NOT EXISTS users (
