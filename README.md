@@ -155,12 +155,13 @@ graph TB
 | Layer | Technology | Purpose | Why Chosen |
 |-------|-----------|---------|-----------|
 | **Services** | Go 1.24+ | Backend services, gRPC, CLI tools | Fast, concurrent, simple, strong typing, production reliability |
-| **API Gateway** | GraphQL & gRPC | Public and internal service boundaries | Type safety, strong contracts, code generation, federation |
-| **Database** | PostgreSQL 15+ | Transactional data, JSONB, full-text search | ACID compliance, rich querying, proven at scale |
+| **API Gateway** | GraphQL + gRPC | Public and internal service boundaries | Type safety, strong contracts, code generation, federation |
+| **Database** | PostgreSQL 15+ | Transactional data, JSONB, full-text search | ACID compliance, rich querying, proven at scale, pgVector for embeddings |
 | **Caching** | Redis | Hot read cache, session storage | Sub-millisecond latency, atomic operations, Pub/Sub |
 | **Events** | Apache Kafka | Domain events, event replay, consumer groups | Distributed durability, topic replay, ordering guarantees |
 | **Workflows** | Temporal | Long-running orchestration, retries | Durable execution, automatic compensation, visibility |
 | **Search** | pgVector + PostgreSQL | Semantic and hybrid search | Embedding storage, HNSW indexing, single database |
+| **Message Queue** | RabbitMQ | Async task distribution, notifications | Dead-letter queues, manual ack, familiar for operations |
 | **Observability** | OpenTelemetry + Prometheus | Tracing, metrics, logs | Vendor-neutral, standard instrumentation, ecosystem |
 | **Container** | Docker & Docker Compose | Local development, deployment units | Reproducibility, isolation, multi-service orchestration |
 | **Auth** | JWT (HMAC SHA-256) | Stateless access tokens, session management | Fast verification, no central lookup, refresh-token rotation |
@@ -175,9 +176,9 @@ graph TB
 
 ```bash
 # Verify versions
-go version          # Go 1.24+
-docker --version    # Docker 24.0+
-docker compose version  # Docker Compose 2.0+
+go version                      # Go 1.24+
+docker --version                # Docker 24.0+
+docker compose version          # Docker Compose 2.0+
 ```
 
 ### 1. Clone & Setup
@@ -187,102 +188,124 @@ git clone https://github.com/Tanmoy095/LogiSynapse.git
 cd LogiSynapse
 ```
 
-### 2. Create `.env` file
+### 2. Configure Environment
+
+The `.env` file is already configured with sensible defaults for local development:
 
 ```bash
-# Copy the template
-cp .env.example .env  # or create manually with below
+# Review/edit if needed (most defaults are fine for local dev)
+cat .env
 
-# Database
-DB_USER=postgres
-DB_PASSWORD=postgres
-DB_HOST=postgres
-DB_PORT=5432
-DB_NAME=logsynapse
-
-# Authentication Service
-AUTH_GRPC_ADDR=0.0.0.0:50052
-AUTH_JWT_SECRET=your-super-secret-key-min-32-chars-long
-AUTH_JWT_ISSUER=logsynapse
-AUTH_JWT_AUDIENCE=logsynapse-api
-AUTH_ACCESS_TOKEN_TTL_MINUTES=15
-AUTH_AUTO_MIGRATE=true
-
-# GraphQL Gateway
-GRAPHQL_PORT=8080
-AUTH_SERVICE_ADDR=authentication-service:50052
-
-# Shipment Service
-SHIPMENT_GRPC_ADDR=0.0.0.0:50051
-SHIPPO_API_KEY=your-shippo-api-key-here
-
-# Billing Service
-STRIPE_API_KEY=your-stripe-api-key-here
+# For production, create a separate config and update:
+# - AUTH_JWT_SECRET (change from default)
+# - STRIPE_SECRET_KEY (add your actual key)
+# - SHIPPO_API_KEY (add your actual key)
 ```
 
-### 3. Start the Stack
+If you need the template for reference:
+```bash
+cp .env.example .env.local  # Keep original, create a variant
+```
+
+### 3. Start the Full Stack
 
 ```bash
-# Build and start all services
+# Build all service images and start containers
 docker compose up --build
 
-# Logs appear in real-time; Ctrl+C to stop
+# First run: images build and migrations run (~30-60s)
+# Subsequent runs: just start containers (~5-10s)
+# Logs stream in real-time; press Ctrl+C to stop
 ```
 
-### 4. Verify Services are Running
+### 4. Verify All Services are Healthy
 
 ```bash
-# In another terminal:
+# In another terminal, verify containers are running:
+docker compose ps
 
-# Check GraphQL Gateway
+# Expected output: all services showing "Up"
+# - postgres (port 5432)
+# - authentication-service (port 50052)
+# - shipment-service (port 50051)
+# - graphql-gateway (port 8080)
+# - kafka (port 9092)
+# - rabbitmq (ports 5672, 15672)
+# - temporal, temporal-db, temporal-ui
+```
+
+### 5. Check Service Health
+
+```bash
+# GraphQL Gateway health
 curl http://localhost:8080/health
 
-# Check Shipment Service
-grpcurl -plaintext localhost:50051 list
+# Expected: {"status":"healthy","service":"graphql-gateway"}
 
-# Check Authentication Service
-grpcurl -plaintext localhost:50052 list
-```
-
-### 5. Try the GraphQL API
-
-```bash
-# Open GraphQL Playground
+# GraphQL playground (no auth required for UI)
 open http://localhost:8080/
 
-# Example mutation: Register a user
-mutation RegisterUser {
-  registerUser(input: {
-    email: "user@example.com"
-    password: "secure-password-123"
-  }) {
-    id
-    email
-    createdAt
-  }
-}
+# RabbitMQ Management UI
+open http://localhost:15672/  # guest:guest
 
-# Example query: List shipments
-query ListShipments {
-  shipments {
-    id
-    status
-    carrier
-    trackingNumber
-    estimatedDelivery
-  }
-}
+# Temporal Workflow UI
+open http://localhost:8088/
 ```
 
-### 6. Run Tests
+### 6. Try the GraphQL API
+
+```bash
+# 1. Register a user (no auth required)
+curl -X POST http://localhost:8080/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "mutation { registerUser(input: {email: \"user@example.com\" password: \"SecurePass123!\" firstName: \"John\" lastName: \"Doe\"}) { userId } }"
+  }'
+
+# 2. Login to get tokens
+curl -X POST http://localhost:8080/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "mutation { loginUser(input: {email: \"user@example.com\" password: \"SecurePass123!\"}) { accessToken refreshToken } }"
+  }'
+
+# 3. Use the accessToken in protected queries
+# Replace TOKEN with the actual token from login response
+curl -X POST http://localhost:8080/query \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer TOKEN" \
+  -d '{
+    "query": "query { shipments { id status carrier } }"
+  }'
+```
+
+Or use the **GraphQL Playground** UI at http://localhost:8080/ with the same queries.
+
+### 7. Run Tests
 
 ```bash
 # Test all services
 go test ./...
 
+# Test with verbose output
+go test -v ./...
+
 # Test a specific service
 cd services/shipment-service
 go test ./...
+
+# Run with race detector (recommended)
+go test -race ./...
+```
+
+### 8. Stop the Stack
+
+```bash
+# Stop all containers
+docker compose down
+
+# Also remove volumes (WARNING: deletes database data)
+docker compose down -v
 ```
 
 ---
@@ -465,7 +488,106 @@ GraphQL Gateway (subsequent requests)
 
 ---
 
-## 👨‍💻 Development
+## � Troubleshooting
+
+### Container Issues
+
+**Containers fail to start or crash immediately**
+
+```bash
+# Check logs for the failing service
+docker compose logs graphql-gateway
+docker compose logs authentication-service
+docker compose logs shipment-service
+
+# Rebuild from scratch
+docker compose down
+docker system prune -a --volumes
+docker compose up --build
+```
+
+**Port already in use**
+
+```bash
+# Check which process is using the port
+lsof -i :8080   # GraphQL gateway
+lsof -i :50052  # Auth service
+lsof -i :50051  # Shipment service
+
+# Kill the process
+kill -9 <PID>
+
+# Or update docker-compose.yml ports
+```
+
+### Database Issues
+
+**Migrations fail on startup**
+
+```bash
+# Check auth service logs
+docker compose logs authentication-service
+
+# Manually run migrations
+docker compose exec postgres psql -U postgres -d logisynapse -f /migrations/001_create_users.sql
+```
+
+**Database connection refused**
+
+```bash
+# Ensure PostgreSQL is healthy
+docker compose ps postgres
+
+# Check health status
+docker compose logs postgres | grep "ready to accept"
+
+# Wait a bit longer and retry
+docker compose down
+docker compose up --build --wait
+```
+
+### Service Communication Issues
+
+**Cannot connect to authentication-service from gateway**
+
+```bash
+# Verify services are on the same network
+docker network inspect loginet
+
+# Check gateway logs for connection errors
+docker compose logs graphql-gateway | grep "failed to connect"
+
+# Ping from gateway container
+docker compose exec graphql-gateway ping authentication-service
+
+# Verify DNS resolution
+docker compose exec graphql-gateway getent hosts authentication-service
+```
+
+**gRPC connection timeouts**
+
+```bash
+# Ensure AUTH_SERVICE_ADDR in .env matches docker-compose
+# Should be: authentication-service:50052 (not localhost:50052)
+
+# Check if service is actually listening
+docker compose exec authentication-service netstat -tulnp | grep 50052
+```
+
+### Development
+
+**Tests fail with "dial tcp: lookup localhost: no such host"**
+
+```bash
+# When testing in Docker, use service names, not localhost
+# In docker-compose: authentication-service:50052
+# In localhost dev: localhost:50052
+
+# Run tests locally (not in container)
+go test ./services/authentication-service/...
+```
+
+---
 
 ### Running Tests
 
@@ -512,10 +634,47 @@ protoc --go_out=. --go-grpc_out=. *.proto
 
 ### Adding a New Service
 
-1. Create `services/my-service/` with structure matching existing services
-2. Add to `docker-compose.yml` with health check and dependencies
-3. Wire into `graphql-gateway/client/my-service.client.go` if needed
-4. Document in [docs/02-system-design/07-project-structure-lld.md](docs/02-system-design/07-project-structure-lld.md)
+1. Create `services/my-service/` with structure matching existing services:
+   ```
+   services/my-service/
+   ├── cmd/main.go              # Service entrypoint
+   ├── internal/
+   │   ├── domain/              # Business logic
+   │   ├── app/                 # Use cases
+   │   ├── ports/               # Interfaces
+   │   ├── infra/               # Adapters (SQL, gRPC)
+   │   ├── transport/           # API handlers
+   │   └── config/              # Configuration
+   ├── db/migrations/           # SQL migrations
+   ├── Dockerfile
+   ├── go.mod
+   ├── go.sum
+   └── README.md                # Service-specific docs
+   ```
+
+2. Create a service `README.md` documenting:
+   - Service purpose and responsibilities
+   - API/gRPC contracts
+   - Database schema
+   - Configuration options
+   - Example requests
+   - Known limitations
+
+3. Add to `docker-compose.yml` with:
+   - Build context and Dockerfile
+   - Port mappings
+   - Environment variables
+   - Health check
+   - Dependencies
+   - Network and volumes
+
+4. Wire into GraphQL gateway if needed:
+   ```go
+   // Add client in services/graphql-gateway/client/my-service.client.go
+   // Update resolver.go to inject the client
+   ```
+
+5. Document in [docs/02-system-design/07-project-structure-lld.md](docs/02-system-design/07-project-structure-lld.md)
 
 ### Local Development Best Practices
 
@@ -604,15 +763,54 @@ View observability data:
 
 ## 🗺️ Roadmap
 
-- [ ] Add Kafka to local compose for end-to-end event replay testing
-- [ ] Expand unit, integration, and E2E test coverage
-- [ ] Implement observability stack (Jaeger, Prometheus, Grafana)
-- [ ] Add AI retrieval service with pgVector semantic search
-- [ ] Implement AI orchestration workflows with LangGraph
-- [ ] Add eval pipeline for AI quality monitoring
-- [ ] Kubernetes deployment manifests (Helm charts)
+### Phase 1: Foundation (Current)
+- [x] Multi-service Go architecture with clean boundaries
+- [x] PostgreSQL with migrations and transactional consistency
+- [x] GraphQL gateway with authentication middleware
+- [x] JWT-based multi-tenant authentication and authorization
+- [x] gRPC service-to-service communication
+- [x] Docker Compose local development stack
+- [x] Basic service documentation and architecture decisions
+
+### Phase 2: Event-Driven Architecture
+- [ ] Kafka topic-per-service event publishing
+- [ ] Transactional outbox pattern in shipment-service
+- [ ] Event replay and consumer group support
+- [ ] Idempotent event handlers across services
+
+### Phase 3: Workflow Orchestration
+- [ ] Temporal workflow definitions for shipment lifecycle
+- [ ] Activity implementations for carrier integration
+- [ ] Compensation and saga patterns
+- [ ] Temporal Web UI integration with logs
+
+### Phase 4: AI Integration
+- [ ] Retrieval service with pgVector semantic search
+- [ ] Embedding generation for shipments and policies
+- [ ] AI gateway for quota and token management
+- [ ] Orchestrated AI agents for investigation and decisions
+- [ ] LangGraph integration for multi-step reasoning
+
+### Phase 5: Observability & Reliability
+- [ ] Distributed tracing with Jaeger
+- [ ] Prometheus metrics and custom dashboards
+- [ ] Structured logging with correlation IDs
+- [ ] Health checks and graceful shutdown
+- [ ] Service resilience patterns (circuit breaker, etc.)
+
+### Phase 6: Advanced Features
+- [ ] Order service with outbox pattern
+- [ ] Billing service ledger and invoice generation
+- [ ] Notification service with email/SMS/webhook
+- [ ] Rate limiting and quota enforcement
+- [ ] API versioning and backward compatibility
+
+### Phase 7: Production Readiness
+- [ ] Kubernetes deployment manifests
 - [ ] CI/CD pipeline (GitHub Actions)
-- [ ] API documentation (OpenAPI/Swagger)
+- [ ] Automated testing suite (unit, integration, E2E)
+- [ ] Security audit and penetration testing
+- [ ] Performance benchmarks and load testing
 
 ---
 
